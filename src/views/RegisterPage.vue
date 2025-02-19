@@ -4,6 +4,17 @@
       <h2>用户注册</h2>
       <form @submit.prevent="handleRegister">
         <div class="form-item">
+          <label>用户名：</label>
+          <div class="input-wrapper">
+            <input 
+              type="text" 
+              v-model="formData.username" 
+              placeholder="请输入用户名"
+              required
+            >
+          </div>
+        </div>
+        <div class="form-item">
           <label>手机号：</label>
           <div class="input-wrapper">
             <input 
@@ -67,18 +78,20 @@
 </template>
 
 <script>
+import request from '@/utils/request'
+
 export default {
   name: 'RegisterPage',
   data() {
     return {
       formData: {
+        username: '',
         phone: '',
         verificationCode: '',
         password: '',
         confirmPassword: ''
       },
       cooldown: 0,
-      // 模拟的验证码
       fakeCode: ''
     }
   },
@@ -91,27 +104,44 @@ export default {
       }
       return true
     },
-    getVerificationCode() {
+    validateUsername() {
+      if (this.formData.username.length < 2) {
+        alert('用户名至少需要2个字符')
+        return false
+      }
+      return true
+    },
+    async getVerificationCode() {
       if (!this.validatePhone()) return
       
-      // 生成6位随机验证码
-      this.fakeCode = Math.floor(100000 + Math.random() * 900000).toString()
-      console.log('验证码：', this.fakeCode) // 实际项目中需要删除，这里为了测试方便
-      
-      // 开始倒计时
-      this.cooldown = 60
-      const timer = setInterval(() => {
-        this.cooldown--
-        if (this.cooldown <= 0) {
-          clearInterval(timer)
+      try {
+        // 调用发送验证码接口
+        const response = await request.post('/user/sendMsg', {
+          phone: this.formData.phone
+        })
+        
+        if (response.code === 1) {
+          // 开始倒计时
+          this.cooldown = 60
+          const timer = setInterval(() => {
+            this.cooldown--
+            if (this.cooldown <= 0) {
+              clearInterval(timer)
+            }
+          }, 1000)
+          
+          alert('验证码发送成功！')
+        } else {
+          alert(response.msg || '验证码发送失败，请重试')
         }
-      }, 1000)
-      
-      // TODO: 这里后续替换成真实的验证码接口
-      alert(`验证码已发送：${this.fakeCode}`)
+      } catch (error) {
+        console.error('发送验证码失败：', error)
+        alert('验证码发送失败，请重试')
+      }
     },
-    handleRegister() {
+    async handleRegister() {
       // 表单验证
+      if (!this.validateUsername()) return
       if (!this.validatePhone()) return
       
       if (this.formData.password !== this.formData.confirmPassword) {
@@ -119,14 +149,26 @@ export default {
         return
       }
       
-      if (this.formData.verificationCode !== this.fakeCode) {
-        alert('验证码错误！')
-        return
+      try {
+        // 调用注册接口
+        const response = await request.post('/user', {
+          username: this.formData.username,
+          phone: this.formData.phone,
+          password: this.formData.password,
+          code: this.formData.verificationCode  // 验证码
+        })
+        
+        if (response.code === 1) {
+          alert('注册成功！')
+          // 注册成功后跳转到登录页面
+          this.$router.push('/login')
+        } else {
+          alert(response.msg || '注册失败，请重试')
+        }
+      } catch (error) {
+        console.error('注册失败：', error)
+        alert('注册失败，请重试')
       }
-      
-      // TODO: 调用注册接口
-      console.log('注册信息：', this.formData)
-      alert('注册成功！')
     }
   }
 }

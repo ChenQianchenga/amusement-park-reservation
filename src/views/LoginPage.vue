@@ -12,6 +12,7 @@
               placeholder="请输入手机号"
               required
               pattern="^1[3-9]\d{9}$"
+              :disabled="loading"
             >
           </div>
         </div>
@@ -23,13 +24,16 @@
               v-model="formData.password" 
               placeholder="请输入密码"
               required
+              :disabled="loading"
             >
           </div>
         </div>
         <div class="form-links">
           <router-link to="/forgot-password" class="forgot-password">忘记密码？</router-link>
         </div>
-        <button type="submit">登录</button>
+        <button type="submit" :disabled="loading">
+          {{ loading ? '登录中...' : '登录' }}
+        </button>
         <div class="register-link">
           还没有账号？<router-link to="/register">立即注册</router-link>
         </div>
@@ -39,6 +43,8 @@
 </template>
 
 <script>
+import request from '@/utils/request'
+
 export default {
   name: 'LoginPage',
   data() {
@@ -46,7 +52,8 @@ export default {
       formData: {
         phone: '',
         password: ''
-      }
+      },
+      loading: false
     }
   },
   methods: {
@@ -58,12 +65,37 @@ export default {
       }
       return true
     },
-    handleLogin() {
+    async handleLogin() {
       if (!this.validatePhone()) return
       
-      // TODO: 调用登录接口
-      console.log('登录信息：', this.formData)
-      alert('登录成功！')
+      if (!this.formData.password) {
+        alert('请输入密码')
+        return
+      }
+
+      this.loading = true
+      try {
+        const response = await request.post('/user/login', {
+          phone: this.formData.phone,
+          password: this.formData.password
+        })
+        
+        if (response.code === 1) {
+          // 直接保存后端返回的用户信息
+          this.$store.commit('setUserInfo', response.data)
+          this.$store.commit('setToken', response.data.token)
+          
+          alert('登录成功！')
+          this.$router.push('/reservation')
+        } else {
+          alert(response.msg || '登录失败，请检查手机号和密码')
+        }
+      } catch (error) {
+        console.error('登录失败：', error)
+        alert('登录失败，请重试')
+      } finally {
+        this.loading = false
+      }
     }
   }
 }
@@ -167,5 +199,16 @@ button:hover {
 
 .register-link a:hover {
   color: #3aa876;
+}
+
+/* 添加加载状态的样式 */
+button[type="submit"]:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
+}
+
+input:disabled {
+  background-color: #f5f5f5;
+  cursor: not-allowed;
 }
 </style> 

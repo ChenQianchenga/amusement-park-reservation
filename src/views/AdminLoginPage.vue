@@ -1,17 +1,16 @@
 <template>
-  <div class="login">
+  <div class="admin-login">
     <div class="login-container">
-      <h2>用户登录</h2>
+      <h2>管理员登录</h2>
       <form @submit.prevent="handleLogin">
         <div class="form-item">
-          <label>手机号：</label>
+          <label>用户名：</label>
           <div class="input-wrapper">
             <input 
-              type="tel" 
-              v-model="formData.phone" 
-              placeholder="请输入手机号"
+              type="text" 
+              v-model="formData.username" 
+              placeholder="请输入管理员用户名"
               required
-              pattern="^1[3-9]\d{9}$"
               :disabled="loading"
             >
           </div>
@@ -28,15 +27,9 @@
             >
           </div>
         </div>
-        <div class="form-links">
-          <router-link to="/forgot-password" class="forgot-password">忘记密码？</router-link>
-        </div>
         <button type="submit" :disabled="loading">
           {{ loading ? '登录中...' : '登录' }}
         </button>
-        <div class="register-link">
-          还没有账号？<router-link to="/register">立即注册</router-link>
-        </div>
       </form>
     </div>
   </div>
@@ -46,52 +39,40 @@
 import request from '@/utils/request'
 
 export default {
-  name: 'LoginPage',
+  name: 'AdminLoginPage',
   data() {
     return {
       formData: {
-        phone: '',
+        username: '',
         password: ''
       },
       loading: false
     }
   },
   methods: {
-    validatePhone() {
-      const phoneRegex = /^1[3-9]\d{9}$/
-      if (!phoneRegex.test(this.formData.phone)) {
-        alert('请输入正确的手机号码')
-        return false
-      }
-      return true
-    },
     async handleLogin() {
-      if (!this.validatePhone()) return
-      
-      if (!this.formData.password) {
-        alert('请输入密码')
+      if (!this.formData.username || !this.formData.password) {
+        alert('请输入用户名和密码')
         return
       }
 
       this.loading = true
       try {
-        const response = await request.post('/user/login', {
-          phone: this.formData.phone,
+        const response = await request.post('/admin/login', {
+          username: this.formData.username,
           password: this.formData.password
         })
         
         if (response.code === 1) {
-          console.log('登录响应数据：', response.data)
-          
-          // 用户平台使用 authentication
-          this.$store.commit('setAuthentication', response.data.authentication)
+          // 保存管理员信息和 token
           this.$store.commit('setUserInfo', response.data)
-          this.$store.commit('setIsAdmin', false) // 确保设置为用户模式
+          this.$store.commit('setToken', response.data.token)
+          this.$store.commit('setIsAdmin', true)
           
           alert('登录成功！')
-          this.$router.push('/reservation')
+          this.$router.push('/admin/dashboard')
         } else {
-          alert(response.msg || '登录失败，请检查手机号和密码')
+          alert(response.msg || '登录失败，请检查用户名和密码')
         }
       } catch (error) {
         console.error('登录失败：', error)
@@ -105,7 +86,7 @@ export default {
 </script>
 
 <style scoped>
-.login {
+.admin-login {
   display: flex;
   justify-content: center;
   align-items: center;
@@ -157,54 +138,22 @@ input {
   font-size: 14px;
 }
 
-.form-links {
-  text-align: right;
-  margin-bottom: 15px;
-}
-
-.forgot-password {
-  color: #666;
-  font-size: 14px;
-  text-decoration: none;
-}
-
-.forgot-password:hover {
-  color: #42b983;
-}
-
 button[type="submit"] {
   width: 100%;
   height: 40px;
-  background-color: #42b983;
+  background-color: #1890ff;
   color: white;
   border: none;
   border-radius: 4px;
   cursor: pointer;
   font-size: 16px;
+  margin-top: 20px;
 }
 
-button:hover {
-  background-color: #3aa876;
+button:hover:not(:disabled) {
+  background-color: #40a9ff;
 }
 
-.register-link {
-  margin-top: 15px;
-  text-align: center;
-  font-size: 14px;
-  color: #666;
-}
-
-.register-link a {
-  color: #42b983;
-  text-decoration: none;
-  margin-left: 5px;
-}
-
-.register-link a:hover {
-  color: #3aa876;
-}
-
-/* 添加加载状态的样式 */
 button[type="submit"]:disabled {
   background-color: #ccc;
   cursor: not-allowed;

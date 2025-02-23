@@ -7,7 +7,7 @@
       <el-step title="选择日期"></el-step>
       <el-step title="选择门票"></el-step>
       <el-step title="填写信息"></el-step>
-      <el-step title="确认预约"></el-step>
+      <el-step title="支付"></el-step>
     </el-steps>
 
     <!-- 第一步：选择参观日期 -->
@@ -88,9 +88,9 @@
       </div>
     </div>
 
-    <!-- 第四步：确认信息 -->
+    <!-- 第四步：支付 -->
     <div v-show="currentStep === 3" class="step-content">
-      <h3>确认预约信息</h3>
+      <h3>确认支付信息</h3>
       <el-descriptions border>
         <el-descriptions-item label="参观日期">{{ selectedDate }}</el-descriptions-item>
         <el-descriptions-item label="参观时间段">
@@ -114,8 +114,36 @@
         type="primary" 
         :disabled="!canProceed"
         @click="handleNext"
-      >{{ currentStep === 3 ? '提交预约' : '下一步' }}</el-button>
+      >{{ currentStep === 3 ? '立即支付' : '下一步' }}</el-button>
     </div>
+
+    <!-- 支付弹窗 -->
+    <el-dialog
+      title="微信支付"
+      :visible.sync="paymentDialogVisible"
+      :close-on-click-modal="false"
+      width="320px"
+      center
+      custom-class="wechat-pay-dialog"
+    >
+      <div class="wechat-payment">
+        <div class="payment-header">
+          <img src="https://via.placeholder.com/30x30/42b983/ffffff?text=门" class="merchant-logo">
+          <span class="merchant-name">欢乐谷</span>
+        </div>
+        
+        <div class="payment-amount">
+          <small>¥</small>
+          <span>{{ selectedTicketPrice }}</span>
+        </div>
+        
+        <div class="payment-qrcode">
+          <img src="https://via.placeholder.com/200x200/42b983/ffffff?text=微信支付" alt="微信支付">
+          <p>请使用微信扫一扫</p>
+          <p>扫描二维码完成支付</p>
+        </div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -172,11 +200,18 @@ export default {
       submitting: false,
       datePickerOptions: {
         disabledDate(time) {
-          const today = new Date()
-          today.setHours(0, 0, 0, 0)
-          return time.getTime() < today.getTime()
+          // 今天之前的日期不能选
+          const today = new Date(new Date().setHours(0, 0, 0, 0))
+          // 最大可预约天数限制
+          const maxDate = new Date(today)
+          maxDate.setDate(today.getDate() + (this.parkConfig.maxAdvanceDays || 7))
+          
+          return time.getTime() < today.getTime() || time.getTime() > maxDate.getTime()
         }
-      }
+      },
+      paymentDialogVisible: false,  // 支付弹窗显示状态
+      paymentQRCode: '',           // 支付二维码
+      orderId: ''                  // 订单ID
     }
   },
   computed: {
@@ -207,21 +242,21 @@ export default {
     // 获取预约配置
     async fetchParkConfig() {
       try {
-        const response = await request.get('/admin/park/config/1')
+        const response = await request.get('/user/park/config/1')
         if (response.code === 1) {
           this.parkConfig = response.data
-          // 更新日期选择器的限制
+          // 更新日期选择器的配置
           this.datePickerOptions.disabledDate = (time) => {
-            const today = new Date()
-            today.setHours(0, 0, 0, 0)
-            const maxDate = new Date()
-            maxDate.setDate(maxDate.getDate() + this.parkConfig.maxAdvanceDays)
-            return time.getTime() < today.getTime() || 
-                   time.getTime() > maxDate.getTime()
+            const today = new Date(new Date().setHours(0, 0, 0, 0))
+            const maxDate = new Date(today)
+            maxDate.setDate(today.getDate() + (this.parkConfig.maxAdvanceDays || 7))
+            
+            return time.getTime() < today.getTime() || time.getTime() > maxDate.getTime()
           }
         }
       } catch (error) {
-        this.$message.error('获取配置失败')
+        console.error('获取园区配置失败：', error)
+        this.$message.error('获取园区配置失败')
       }
     },
 
@@ -265,24 +300,78 @@ export default {
           return
         }
       } else if (this.currentStep === 3) {
-        // 提交预约
-        await this.submitReservation()
+        // 显示确认信息弹窗
+        this.$confirm(`
+          <div class="confirm-info">
+            <h3>请确认预约信息</h3>
+            <p><label>参观日期：</label>${this.selectedDate}</p>
+            <p><label>参观时间：</label>${this.getTimeSlotText(this.selectedTimeSlot)}</p>
+            <p><label>门票类型：</label>${this.selectedTicketType}</p>
+            <p><label>游客姓名：</label>${this.visitorInfo.name}</p>
+            <p><label>身份证号：</label>${this.visitorInfo.idCard}</p>
+            <p><label>手机号码：</label>${this.visitorInfo.phone}</p>
+            <p class="price"><label>支付金额：</label><span>¥${this.selectedTicketPrice}</span></p>
+          </div>
+        `, '确认支付', {
+          confirmButtonText: '确认支付',
+          cancelButtonText: '取消',
+          dangerouslyUseHTMLString: true,
+          customClass: 'payment-confirm-dialog'
+        }).then(async () => {
+          try {
+            this.submitting = true
+            const response = await request.post('/user/reservation/create', {
+              visitDate: this.selectedDate,
+              visitTime: this.getTimeSlotText(this.selectedTimeSlot),
+              ticketType: this.selectedTicketType,
+              visitorName: this.visitorInfo.name,
+              identityCardNumber: this.visitorInfo.idCard,
+              phoneNumber: this.visitorInfo.phone,
+              paymentAmount: Number(this.selectedTicketPrice),
+              status: 1
+            })
+
+            if (response.code === 1) {
+              this.$message.success('预约成功')
+              this.$router.push('/profile')  // 直接跳转到个人中心
+            } else {
+              this.$message.error(response.msg || '创建预约失败')
+            }
+          } catch (error) {
+            console.error('预约失败：', error)
+            this.$message.error('预约失败，请重试')
+          } finally {
+            this.submitting = false
+          }
+        }).catch(() => {
+          this.$message.info('已取消支付')
+        })
       } else {
         this.currentStep++
       }
     },
 
-    async submitReservation() {
+    // 确认支付
+    async confirmPayment() {
       try {
-        this.submitting = true
-        // TODO: 实现提交预约的接口调用
-        this.$message.success('预约成功')
-        this.$router.push('/my-reservations')
+        const payResponse = await request.post(`/user/reservation/pay/${this.orderId}`)
+        if (payResponse.code === 1) {
+          this.$message.success('支付成功')
+          this.paymentDialogVisible = false
+          this.$router.push('/profile')  // 跳转到个人中心
+        } else {
+          this.$message.error(payResponse.msg || '支付失败')
+        }
       } catch (error) {
-        this.$message.error('预约失败，请重试')
-      } finally {
-        this.submitting = false
+        console.error('支付失败：', error)
+        this.$message.error('支付失败，请重试')
       }
+    },
+
+    // 取消支付
+    cancelPayment() {
+      this.paymentDialogVisible = false
+      this.$message.warning('您已取消支付')
     }
   },
   mounted() {
@@ -324,5 +413,138 @@ export default {
 .step-actions {
   margin-top: 30px;
   text-align: center;
+}
+
+.qr-code {
+  text-align: center;
+  margin-top: 20px;
+}
+
+/* 微信支付弹窗样式 */
+.wechat-pay-dialog {
+  border-radius: 8px;
+}
+
+.wechat-pay-dialog .el-dialog__header {
+  padding: 15px 20px;
+  border-bottom: 1px solid #eee;
+}
+
+.wechat-pay-dialog .el-dialog__title {
+  font-size: 16px;
+  color: #333;
+}
+
+.wechat-pay-dialog .el-dialog__headerbtn {
+  top: 16px;
+}
+
+.wechat-pay-dialog .el-dialog__body {
+  padding: 0;
+}
+
+.wechat-payment {
+  background: #fff;
+}
+
+.payment-header {
+  padding: 20px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid #f5f5f5;
+}
+
+.merchant-logo {
+  width: 30px;
+  height: 30px;
+  border-radius: 4px;
+}
+
+.merchant-name {
+  font-size: 14px;
+  color: #333;
+}
+
+.payment-amount {
+  padding: 20px;
+  text-align: center;
+  font-weight: bold;
+  color: #000;
+}
+
+.payment-amount small {
+  font-size: 20px;
+  margin-right: 4px;
+}
+
+.payment-amount span {
+  font-size: 32px;
+}
+
+.payment-qrcode {
+  padding: 20px;
+  text-align: center;
+  background: #f8f8f8;
+}
+
+.payment-qrcode img {
+  width: 200px;
+  height: 200px;
+  margin-bottom: 15px;
+  background: #fff;
+  padding: 10px;
+  border-radius: 4px;
+}
+
+.payment-qrcode p {
+  margin: 5px 0;
+  color: #666;
+  font-size: 14px;
+}
+
+/* 移除底部按钮 */
+.wechat-pay-dialog .el-dialog__footer {
+  display: none;
+}
+
+/* 确认信息弹窗样式 */
+.payment-confirm-dialog {
+  max-width: 500px;
+}
+
+.payment-confirm-dialog .confirm-info {
+  padding: 20px;
+}
+
+.payment-confirm-dialog .confirm-info h3 {
+  margin-bottom: 20px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #eee;
+  color: #333;
+  text-align: center;
+}
+
+.payment-confirm-dialog .confirm-info p {
+  margin: 10px 0;
+  display: flex;
+  justify-content: space-between;
+}
+
+.payment-confirm-dialog .confirm-info label {
+  color: #666;
+  min-width: 80px;
+}
+
+.payment-confirm-dialog .confirm-info .price {
+  margin-top: 20px;
+  padding-top: 10px;
+  border-top: 1px dashed #eee;
+}
+
+.payment-confirm-dialog .confirm-info .price span {
+  color: #f56c6c;
+  font-size: 20px;
+  font-weight: bold;
 }
 </style> 

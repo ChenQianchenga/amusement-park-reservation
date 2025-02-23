@@ -8,19 +8,41 @@
 import Vue from 'vue'
 import VueRouter from 'vue-router'
 import store from '@/store'
+import MainLayout from '@/components/MainLayout.vue'
 
 Vue.use(VueRouter)
 
 const routes = [
   {
     path: '/',
-    redirect: '/reservation'
-  },
-  {
-    path: '/reservation',
-    name: 'ReservationPage',
-    component: () => import('../views/ReservationPage.vue'),
-    meta: { requiresAuth: true }
+    component: MainLayout,
+    redirect: '/home',
+    children: [
+      {
+        path: 'home',
+        name: 'HomePage',
+        component: () => import('../views/HomePage.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'reservation',
+        name: 'ReservationPage',
+        component: () => import('../views/ReservationPage.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'guide',
+        name: 'GuidePage',
+        component: () => import('../views/GuidePage.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'profile',
+        name: 'ProfilePage',
+        component: () => import('../views/ProfilePage.vue'),
+        meta: { requiresAuth: true }
+      }
+    ]
   },
   {
     path: '/login',

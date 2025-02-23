@@ -86,10 +86,19 @@ export default {
           // 用户平台使用 authentication
           this.$store.commit('setAuthentication', response.data.authentication)
           this.$store.commit('setUserInfo', response.data)
-          this.$store.commit('setIsAdmin', false) // 确保设置为用户模式
+          this.$store.commit('setIsAdmin', false)
           
-          alert('登录成功！')
-          this.$router.push('/reservation')
+          // 使用 Element UI 的消息提示替代 alert
+          this.$message.success('登录成功')
+          
+          // 使用 async/await 处理路由跳转
+          try {
+            await this.$router.push('/reservation')
+          } catch (err) {
+            if (err.name !== 'NavigationDuplicated') {
+              console.error('路由跳转失败:', err)
+            }
+          }
         } else {
           alert(response.msg || '登录失败，请检查手机号和密码')
         }

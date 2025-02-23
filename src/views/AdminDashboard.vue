@@ -169,32 +169,83 @@
       <!-- 预约管理 -->
       <div v-show="currentTab === 'reservation'" class="module-container">
         <h3>预约管理</h3>
+        <div class="action-bar">
+          <div class="search-box">
+            <input 
+              type="text" 
+              v-model="searchPhone" 
+              placeholder="请输入手机号搜索"
+              @keyup.enter="handleSearch"
+            >
+            <button class="search-btn" @click="handleSearch">
+              <i class="search-icon">🔍</i>
+            </button>
+          </div>
+          <el-button 
+            type="primary"
+            icon="el-icon-download"
+            @click="handleExportReservations"
+            :loading="exporting"
+          >
+            导出预约
+          </el-button>
+        </div>
         <div class="list-container">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>用户名</th>
-                <th>预约日期</th>
-                <th>票种</th>
-                <th>数量</th>
-                <th>状态</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="order in orders" :key="order.id">
-                <td>{{ order.username }}</td>
-                <td>{{ order.date }}</td>
-                <td>{{ order.ticketType }}</td>
-                <td>{{ order.quantity }}</td>
-                <td>{{ order.status }}</td>
-                <td>
-                  <button class="approve-btn" @click="handleApproveOrder(order.id)">审核</button>
-                  <button class="delete-btn" @click="handleDeleteOrder(order.id)">删除</button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+          <el-table :data="reservations" style="width: 100%">
+            <el-table-column prop="visitDate" label="预约日期"></el-table-column>
+            <el-table-column prop="visitTime" label="时间段"></el-table-column>
+            <el-table-column prop="ticketType" label="门票类型"></el-table-column>
+            <el-table-column prop="visitorName" label="游客姓名"></el-table-column>
+            <el-table-column prop="phoneNumber" label="联系电话"></el-table-column>
+            <el-table-column prop="paymentAmount" label="金额">
+              <template slot-scope="scope">
+                <span class="amount">¥{{ scope.row.paymentAmount }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="status" label="状态">
+              <template slot-scope="scope">
+                <el-tag :type="getStatusType(scope.row.status)">
+                  {{ getStatusText(scope.row.status) }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="280">
+              <template slot-scope="scope">
+                <el-button 
+                  size="mini" 
+                  type="success" 
+                  @click="handleVerify(scope.row)"
+                  :disabled="scope.row.status !== 1"
+                >核销</el-button>
+                <el-button 
+                  size="mini" 
+                  type="warning" 
+                  @click="handleExpire(scope.row)"
+                  :disabled="scope.row.status !== 1"
+                >过期</el-button>
+                <el-button 
+                  size="mini" 
+                  type="danger" 
+                  @click="handleCancel(scope.row)"
+                  :disabled="scope.row.status !== 1"
+                >取消预约</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+        <!-- 分页器 -->
+        <div class="pagination-container">
+          <el-pagination
+            background
+            @size-change="handleReservationSizeChange"
+            @current-change="handleReservationPageChange"
+            :current-page="reservationPageNum"
+            :page-sizes="[10, 20, 50, 100]"
+            :page-size="reservationPageSize"
+            layout="total, sizes, prev, pager, next, jumper"
+            :total="reservationTotal"
+          >
+          </el-pagination>
         </div>
       </div>
 
@@ -508,7 +559,7 @@ export default {
       ],
       announcements: [],
       users: [],
-      orders: [],
+      reservations: [],
       tickets: [],
       ticketTotal: 0,         // 门票总数
       ticketPageSize: 10,     // 每页显示条数
@@ -582,7 +633,11 @@ export default {
           { pattern: /^[1-9]\d*$/, message: '请输入正整数', trigger: 'blur' }
         ]
       },
-      saving: false
+      saving: false,
+      searchPhone: '',  // 改为搜索手机号
+      reservationPageNum: 1,      // 预约管理的当前页码
+      reservationPageSize: 10,    // 预约管理的每页显示条数
+      reservationTotal: 0,        // 预约管理的总记录数
     }
   },
   computed: {
@@ -635,14 +690,81 @@ export default {
     },
 
     // 预约管理方法
-    async handleApproveOrder(orderId) {
-      // TODO: 实现审核预约的具体逻辑
-      console.log('审核预约', orderId)
+    async handleVerify(reservation) {
+      try {
+        await this.$confirm('确定要核销这个预约吗？', '提示', {
+          type: 'warning'
+        })
+        
+        const response = await request.put('/admin/reservation', {
+          reservationId: reservation.reservationId,
+          status: 2  // 已使用状态
+        })
+
+        if (response.code === 1) {
+          this.$message.success('核销成功')
+          this.fetchReservations()
+        } else {
+          this.$message.error(response.msg || '核销失败')
+        }
+      } catch (error) {
+        if (error !== 'cancel') {
+          console.error('核销失败：', error)
+          this.$message.error('核销失败，请重试')
+        }
+      }
     },
 
-    async handleDeleteOrder(orderId) {
-      // TODO: 实现删除预约的具体逻辑
-      console.log('删除预约', orderId)
+    async handleExpire(reservation) {
+      try {
+        await this.$confirm('确定要将这个预约设置为过期吗？', '提示', {
+          type: 'warning'
+        })
+        
+        const response = await request.put('/admin/reservation', {
+          reservationId: reservation.reservationId,
+          status: 3  // 已过期状态
+        })
+
+        if (response.code === 1) {
+          this.$message.success('设置成功')
+          this.fetchReservations()
+        } else {
+          this.$message.error(response.msg || '设置失败')
+        }
+      } catch (error) {
+        if (error !== 'cancel') {
+          console.error('设置失败：', error)
+          this.$message.error('设置失败，请重试')
+        }
+      }
+    },
+
+    async handleCancel(reservation) {
+      try {
+        await this.$confirm('确定要取消这个预约吗？', '提示', {
+          type: 'warning'
+        })
+        
+        const response = await request.delete('/admin/reservation', {
+          data: {
+            reservationId: reservation.reservationId,
+            ticketType: reservation.ticketType  // 添加 ticketType 参数
+          }
+        })
+
+        if (response.code === 1) {
+          this.$message.success('取消预约成功')
+          this.fetchReservations()  // 刷新列表
+        } else {
+          this.$message.error(response.msg || '取消预约失败')
+        }
+      } catch (error) {
+        if (error !== 'cancel') {
+          console.error('取消预约失败：', error)
+          this.$message.error('取消预约失败，请重试')
+        }
+      }
     },
 
     // 门票管理方法
@@ -796,9 +918,26 @@ export default {
       }
     },
 
-    async fetchOrders() {
-      // TODO: 获取预约列表
-      console.log('获取预约列表')
+    async fetchReservations() {
+      try {
+        const response = await request.get('/admin/reservation/page', {
+          params: {
+            pageNum: this.reservationPageNum,
+            pageSize: this.reservationPageSize,
+            phoneNumber: this.searchPhone || undefined
+          }
+        })
+        
+        if (response.code === 1) {
+          this.reservations = response.data.records
+          this.reservationTotal = response.data.total
+        } else {
+          this.$message.error(response.msg || '获取预约列表失败')
+        }
+      } catch (error) {
+        console.error('获取预约列表失败：', error)
+        this.$message.error('获取预约列表失败')
+      }
     },
 
     async fetchTickets() {
@@ -980,8 +1119,8 @@ export default {
     },
     // 处理搜索
     handleSearch() {
-      this.currentPage = 1  // 搜索时重置到第一页
-      this.getAnnouncements()
+      this.reservationPageNum = 1  // 重置到第一页
+      this.fetchReservations()
     },
     // 重置搜索
     resetSearch() {
@@ -1166,12 +1305,93 @@ export default {
     // 切换 tab
     handleTabChange(tab) {
       this.currentTab = tab
-    }
+    },
+    // 获取状态类型
+    getStatusType(status) {
+      const statusMap = {
+        1: 'primary',  // 待使用 - 蓝色
+        2: 'success',  // 已使用 - 绿色
+        3: 'info'      // 已过期 - 灰色
+      }
+      return statusMap[status] || 'info'
+    },
+
+    // 获取状态文本
+    getStatusText(status) {
+      const statusMap = {
+        1: '待使用',
+        2: '已使用',
+        3: '已过期'
+      }
+      return statusMap[status] || '未知状态'
+    },
+
+    // 导出预约数据
+    async handleExportReservations() {
+      try {
+        this.exporting = true
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+        const fileName = encodeURIComponent(`预约数据_${timestamp}.csv`)
+        
+        // 从 store 获取 token
+        const token = this.$store.state.token
+        
+        // 创建一个临时的 a 标签
+        const link = document.createElement('a')
+        link.href = `/api/admin/reservation/export?fileName=${fileName}`
+        // 添加 token 到请求头
+        link.setAttribute('download', `预约数据_${timestamp}.csv`)
+        
+        // 创建一个 XMLHttpRequest 来处理下载
+        const xhr = new XMLHttpRequest()
+        xhr.open('GET', link.href, true)
+        xhr.responseType = 'blob'
+        xhr.setRequestHeader('token', token)
+        
+        xhr.onload = () => {
+          if (xhr.status === 200) {
+            const blob = new Blob([xhr.response], { type: 'text/csv;charset=utf-8' })
+            const downloadUrl = URL.createObjectURL(blob)
+            link.href = downloadUrl
+            document.body.appendChild(link)
+            link.click()
+            document.body.removeChild(link)
+            URL.revokeObjectURL(downloadUrl)
+            this.$message.success('导出成功')
+          } else {
+            this.$message.error('导出失败，请重试')
+          }
+          this.exporting = false
+        }
+        
+        xhr.onerror = () => {
+          this.$message.error('导出失败，请重试')
+          this.exporting = false
+        }
+        
+        xhr.send()
+      } catch (error) {
+        console.error('导出失败：', error)
+        this.$message.error('导出失败，请重试')
+        this.exporting = false
+      }
+    },
+    // 处理预约管理的页码变化
+    handleReservationPageChange(val) {
+      this.reservationPageNum = val
+      this.fetchReservations()
+    },
+    // 处理预约管理的每页条数变化
+    handleReservationSizeChange(val) {
+      this.reservationPageSize = val
+      this.reservationPageNum = 1  // 重置到第一页
+      this.fetchReservations()
+    },
   },
   mounted() {
     this.getAnnouncements()
     this.fetchUsers()
-    this.fetchOrders()
+    this.fetchReservations()
     this.fetchTickets()
     this.fetchSettings()
   },
@@ -1186,7 +1406,7 @@ export default {
           this.fetchUsers()
           break
         case 'reservation':
-          this.fetchOrders()
+          this.fetchReservations()
           break
         case 'ticket':
           this.fetchTickets()
@@ -1630,156 +1850,6 @@ button:hover {
   font-size: 20px;
 }
 
-/* 时间段设置样式优化 */
-.timeslot-section {
-  background: white;
-  border-radius: 12px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
-  margin-top: 30px;
-  overflow: hidden;
-}
-
-.section-header {
-  display: flex;
-  align-items: center;
-  padding: 20px;
-  background: #f8f9fa;
-  border-bottom: 1px solid #eee;
-}
-
-.section-header i {
-  font-size: 24px;
-  margin-right: 12px;
-}
-
-.section-header h4 {
-  margin: 0;
-  color: #333;
-  font-size: 16px;
-}
-
-.timeslot-container {
-  padding: 20px;
-}
-
-.timeslot-list {
-  display: grid;
-  gap: 16px;
-  margin-bottom: 20px;
-}
-
-.timeslot-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px;
-  background: #f8f9fa;
-  border-radius: 8px;
-  transition: all 0.3s;
-}
-
-.timeslot-item:hover {
-  background: #f0f2f5;
-  transform: translateY(-2px);
-}
-
-.slot-time {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex: 1;
-}
-
-.slot-time select {
-  width: 120px;
-  height: 36px;
-  padding: 0 12px;
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  font-size: 14px;
-}
-
-.delete-slot {
-  width: 36px;
-  height: 36px;
-  margin-left: 12px;
-  padding: 0;
-  border: none;
-  background: #fff1f0;
-  border-radius: 50%;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #ff4d4f;
-  transition: all 0.3s;
-}
-
-.delete-slot:hover {
-  background: #ffccc7;
-  transform: rotate(15deg);
-}
-
-.add-slot {
-  width: 100%;
-  padding: 16px;
-  background: #f0f7ff;
-  border: 2px dashed #91caff;
-  border-radius: 8px;
-  color: #1890ff;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  font-size: 15px;
-  transition: all 0.3s;
-}
-
-.add-slot:hover {
-  background: #e6f4ff;
-  border-color: #69b1ff;
-}
-
-.add-icon {
-  font-size: 20px;
-  font-weight: bold;
-}
-
-/* 保存按钮优化 */
-.form-actions {
-  margin-top: 40px;
-  padding: 20px;
-  background: white;
-  border-radius: 12px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
-  text-align: center;
-}
-
-.save-btn {
-  padding: 14px 50px;
-  background: linear-gradient(45deg, #1890ff, #40a9ff);
-  color: white;
-  border: none;
-  border-radius: 8px;
-  font-size: 16px;
-  font-weight: 500;
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  cursor: pointer;
-  transition: all 0.3s;
-}
-
-.save-btn:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(24, 144, 255, 0.3);
-}
-
-.save-btn i {
-  font-size: 20px;
-}
-
 .status-tag {
   padding: 4px 12px;
   border-radius: 4px;
@@ -1889,5 +1959,26 @@ button:hover {
 
 :deep(.el-textarea__inner) {
   font-family: inherit;
+}
+
+.reservations-management {
+  padding: 20px;
+}
+
+.pagination-container {
+  margin-top: 20px;
+  display: flex;
+  justify-content: center;
+}
+
+/* 操作按钮间距 */
+.el-button + .el-button {
+  margin-left: 10px;
+}
+
+/* 金额样式 */
+.amount {
+  color: #f56c6c;
+  font-weight: bold;
 }
 </style> 

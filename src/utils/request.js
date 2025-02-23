@@ -45,14 +45,38 @@ request.interceptors.request.use(
 // 响应拦截器
 request.interceptors.response.use(
   response => {
+    // 如果响应码是 401，说明 token 已失效，需要重新登录
+    if (response.data.code === 401) {
+      store.dispatch('logout')
+      // 判断当前路由，避免重复跳转
+      const currentPath = router.currentRoute.path
+      if (currentPath !== '/login' && currentPath !== '/admin/login') {
+        router.push({
+          path: currentPath.includes('admin') ? '/admin/login' : '/login'
+        }).catch(err => {
+          if (err.name !== 'NavigationDuplicated') {
+            throw err
+          }
+        })
+      }
+    }
     return response.data
   },
   error => {
-    console.error('响应错误：', error)
+    // 如果响应码是 401，说明 token 已失效，需要重新登录
     if (error.response && error.response.status === 401) {
-      // token 过期或无效，清除用户信息并跳转到登录页
       store.dispatch('logout')
-      router.push('/login')
+      // 判断当前路由，避免重复跳转
+      const currentPath = router.currentRoute.path
+      if (currentPath !== '/login' && currentPath !== '/admin/login') {
+        router.push({
+          path: currentPath.includes('admin') ? '/admin/login' : '/login'
+        }).catch(err => {
+          if (err.name !== 'NavigationDuplicated') {
+            throw err
+          }
+        })
+      }
     }
     return Promise.reject(error)
   }

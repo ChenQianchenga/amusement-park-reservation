@@ -14,7 +14,7 @@
         v-for="(item, index) in menuItems" 
         :key="index"
         :class="['menu-item', { active: currentTab === item.key }]"
-        @click="currentTab = item.key"
+        @click="handleTabChange(item.key)"
       >
         {{ item.label }}
       </div>
@@ -137,7 +137,7 @@
             ></el-table-column>
             <el-table-column 
               prop="createTime" 
-              label="创建时间"
+              label="注册时间"
               align="center"
               min-width="180"
             ></el-table-column>
@@ -202,38 +202,83 @@
       <div v-show="currentTab === 'ticket'" class="module-container">
         <h3>门票管理</h3>
         <div class="action-bar">
-          <button class="add-btn" @click="handleAddTicket">添加票种</button>
+          <el-button type="primary" icon="el-icon-plus" @click="handleAddTicket">添加门票</el-button>
         </div>
         <div class="list-container">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>票种名称</th>
-                <th>价格（元）</th>
-                <th>描述</th>
-                <th>状态</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="ticket in tickets" :key="ticket.id">
-                <td>{{ ticket.name }}</td>
-                <td>{{ ticket.price }}</td>
-                <td>{{ ticket.description }}</td>
-                <td>{{ ticket.status ? '在售' : '停售' }}</td>
-                <td>
-                  <button class="edit-btn" @click="handleEditTicket(ticket)">编辑</button>
-                  <button 
-                    :class="['status-btn', ticket.status ? 'stop-btn' : 'start-btn']"
-                    @click="handleToggleTicketStatus(ticket.id, !ticket.status)"
-                  >
-                    {{ ticket.status ? '停售' : '开售' }}
-                  </button>
-                  <button class="delete-btn" @click="handleDeleteTicket(ticket.id)">删除</button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+          <el-table 
+            :data="tickets" 
+            style="width: 100%"
+            border
+            stripe
+            highlight-current-row
+          >
+            <el-table-column 
+              prop="ticketType" 
+              label="门票类型" 
+              align="center"
+            ></el-table-column>
+            <el-table-column 
+              prop="price" 
+              label="价格(元)" 
+              align="center"
+            ></el-table-column>
+            <el-table-column 
+              prop="availableStock" 
+              label="库存" 
+              align="center"
+            ></el-table-column>
+            <el-table-column 
+              prop="status" 
+              label="状态" 
+              align="center"
+            >
+              <template slot-scope="scope">
+                <el-tag :type="scope.row.status === 1 ? 'success' : 'info'">
+                  {{ scope.row.status === 1 ? '在售' : '停售' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column 
+              label="操作" 
+              width="300" 
+              align="center"
+            >
+              <template slot-scope="scope">
+                <el-button 
+                  size="mini" 
+                  type="primary" 
+                  @click="handleEditTicket(scope.row)"
+                >编辑</el-button>
+                <el-button 
+                  size="mini"
+                  :type="scope.row.status === 1 ? 'warning' : 'success'"
+                  @click="handleToggleTicketStatus(scope.row)"
+                >
+                  {{ scope.row.status === 1 ? '停售' : '起售' }}
+                </el-button>
+                <el-button 
+                  size="mini" 
+                  type="danger" 
+                  @click="handleDeleteTicket(scope.row.id)"
+                >删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          
+          <!-- 门票列表分页器 -->
+          <div class="pagination">
+            <el-pagination
+              background
+              layout="total, sizes, prev, pager, next, jumper"
+              :total="ticketTotal"
+              :page-size="ticketPageSize"
+              :page-sizes="[10, 20, 30, 50]"
+              :current-page.sync="ticketCurrentPage"
+              @current-change="handleTicketPageChange"
+              @size-change="handleTicketSizeChange"
+            >
+            </el-pagination>
+          </div>
         </div>
       </div>
 
@@ -284,7 +329,7 @@
                     <button @click="decreaseMaxVisitors" class="ctrl-btn">-</button>
                     <input 
                       type="number" 
-                      v-model.number="settings.maxVisitors"
+                      v-model.number="settings.dailyLimit"
                       min="1"
                       max="10000"
                     >
@@ -308,7 +353,7 @@
                     <button @click="decreaseAdvanceDays" class="ctrl-btn">-</button>
                     <input 
                       type="number" 
-                      v-model.number="settings.advanceDays"
+                      v-model.number="settings.maxAdvanceDays"
                       min="1"
                       max="30"
                     >
@@ -329,18 +374,18 @@
             <div class="timeslot-container">
               <div class="timeslot-list">
                 <div 
-                  v-for="(slot, index) in settings.timeSlots" 
+                  v-for="(slot, index) in settings.openingPeriods" 
                   :key="index" 
                   class="timeslot-item"
                 >
                   <div class="slot-time">
-                    <select v-model="slot.start">
+                    <select v-model="slot.startTime">
                       <option v-for="time in timeOptions" :key="time" :value="time">
                         {{ time }}
                       </option>
                     </select>
                     <span class="divider">至</span>
-                    <select v-model="slot.end">
+                    <select v-model="slot.endTime">
                       <option v-for="time in timeOptions" :key="time" :value="time">
                         {{ time }}
                       </option>
@@ -369,35 +414,30 @@
     </div>
 
     <!-- 门票编辑弹窗 -->
-    <el-dialog
-      :title="ticketForm.id ? '编辑票种' : '添加票种'"
+    <el-dialog 
+      :title="ticketForm.id ? '编辑门票' : '添加门票'" 
       :visible.sync="ticketDialogVisible"
-      width="40%"
+      width="500px"
     >
-      <div class="ticket-form">
-        <div class="form-item">
-          <label>票种名称：</label>
-          <input type="text" v-model="ticketForm.name" placeholder="请输入票种名称">
-        </div>
-        <div class="form-item">
-          <label>价格：</label>
-          <input type="number" v-model="ticketForm.price" placeholder="请输入价格">
-        </div>
-        <div class="form-item">
-          <label>描述：</label>
-          <textarea v-model="ticketForm.description" placeholder="请输入票种描述"></textarea>
-        </div>
-        <div class="form-item">
-          <label>状态：</label>
-          <select v-model="ticketForm.status">
-            <option :value="true">在售</option>
-            <option :value="false">停售</option>
-          </select>
-        </div>
-      </div>
-      <div slot="footer">
-        <button class="cancel-btn" @click="ticketDialogVisible = false">取消</button>
-        <button class="confirm-btn" @click="handleSaveTicket">确定</button>
+      <el-form 
+        ref="ticketForm" 
+        :model="ticketForm" 
+        :rules="ticketRules" 
+        label-width="80px"
+      >
+        <el-form-item label="类型" prop="ticketType">
+          <el-input v-model="ticketForm.ticketType" placeholder="请输入门票类型"></el-input>
+        </el-form-item>
+        <el-form-item label="价格" prop="price">
+          <el-input v-model="ticketForm.price" type="number" placeholder="请输入门票价格"></el-input>
+        </el-form-item>
+        <el-form-item label="库存" prop="availableStock">
+          <el-input v-model="ticketForm.availableStock" type="number" placeholder="请输入门票库存"></el-input>
+        </el-form-item>
+      </el-form>
+      <div slot="footer" class="dialog-footer">
+        <el-button @click="ticketDialogVisible = false">取 消</el-button>
+        <el-button type="primary" @click="handleSaveTicket" :loading="saving">确 定</el-button>
       </div>
     </el-dialog>
 
@@ -470,31 +510,32 @@ export default {
       users: [],
       orders: [],
       tickets: [],
+      ticketTotal: 0,         // 门票总数
+      ticketPageSize: 10,     // 每页显示条数
+      ticketCurrentPage: 1,   // 当前页码
       ticketDialogVisible: false,
       ticketForm: {
         id: null,
-        name: '',
-        price: '',
-        description: '',
-        status: true
+        ticketType: '',        // 类型
+        price: '',             // 票价
+        availableStock: '',    // 可售库存
+        status: 1             // 门票状态，默认在售
       },
       settings: {
-        openTime: '09:00',
-        closeTime: '17:00',
-        maxVisitors: 1000,
-        advanceDays: 7,
-        timeSlots: [
-          { start: '09:00', end: '11:00' },
-          { start: '13:00', end: '15:00' },
-          { start: '15:00', end: '17:00' }
-        ]
+        parkName: '',           // 公园名称
+        openTime: '',           // 开放时间
+        closeTime: '',          // 关闭时间
+        dailyLimit: 0,          // 每日限制人数
+        maxAdvanceDays: 7,      // 最大提前预约天数
+        openingPeriods: []      // 开放时间段
       },
       timeOptions: [
         '08:00', '08:30', '09:00', '09:30', '10:00',
         '10:30', '11:00', '11:30', '12:00', '12:30',
         '13:00', '13:30', '14:00', '14:30', '15:00',
         '15:30', '16:00', '16:30', '17:00', '17:30',
-        '18:00', '18:30', '19:00', '19:30', '20:00'
+        '18:00', '18:30', '19:00', '19:30', '20:00',
+        '20:30', '21:00', '21:30', '22:00'
       ],
       specialDateDialogVisible: false,
       specialDateForm: {
@@ -526,7 +567,22 @@ export default {
       userPageSize: 10,
       userCurrentPage: 1,
       searchUsername: '',
-      exporting: false
+      exporting: false,
+      ticketRules: {
+        ticketType: [
+          { required: true, message: '请输入门票类型', trigger: 'blur' },
+          { min: 2, max: 20, message: '长度在 2 到 20 个字符', trigger: 'blur' }
+        ],
+        price: [
+          { required: true, message: '请输入门票价格', trigger: 'blur' },
+          { pattern: /^[1-9]\d*(\.\d{1,2})?$/, message: '请输入正确的价格格式', trigger: 'blur' }
+        ],
+        availableStock: [
+          { required: true, message: '请输入门票库存', trigger: 'blur' },
+          { pattern: /^[1-9]\d*$/, message: '请输入正整数', trigger: 'blur' }
+        ]
+      },
+      saving: false
     }
   },
   computed: {
@@ -593,67 +649,104 @@ export default {
     async handleAddTicket() {
       this.ticketForm = {
         id: null,
-        name: '',
-        price: '',
-        description: '',
-        status: true
+        ticketType: '',        // 类型
+        price: '',             // 票价
+        availableStock: '',    // 可售库存
+        status: 1             // 门票状态，默认在售
       }
       this.ticketDialogVisible = true
     },
 
-    async handleEditTicket(ticket) {
-      this.ticketForm = { ...ticket }
+    async handleEditTicket(row) {
+      this.ticketForm = {
+        id: row.id,
+        ticketType: row.ticketType,
+        price: row.price,
+        availableStock: row.availableStock,
+        status: row.status
+      }
       this.ticketDialogVisible = true
     },
 
     async handleSaveTicket() {
       try {
-        const url = this.ticketForm.id ? `/admin/ticket/${this.ticketForm.id}` : '/admin/ticket'
-        const method = this.ticketForm.id ? 'put' : 'post'
+        await this.$refs.ticketForm.validate()
+        this.saving = true
         
-        const response = await request[method](url, this.ticketForm)
+        const method = this.ticketForm.id ? 'put' : 'post'
+        const response = await request[method]('/admin/ticket', {
+          ...this.ticketForm,
+          price: parseFloat(this.ticketForm.price),
+          availableStock: parseInt(this.ticketForm.availableStock)
+        })
+        
         if (response.code === 1) {
-          alert('保存成功')
+          this.$message.success(this.ticketForm.id ? '编辑成功' : '添加成功')
           this.ticketDialogVisible = false
           this.fetchTickets()
+          this.$refs.ticketForm.resetFields()
         } else {
-          alert(response.msg || '保存失败')
+          this.$message.error(response.msg || (this.ticketForm.id ? '编辑失败' : '添加失败'))
         }
       } catch (error) {
-        console.error('保存失败：', error)
-        alert('保存失败，请重试')
+        console.error(this.ticketForm.id ? '编辑失败：' : '添加失败：', error)
+        this.$message.error(this.ticketForm.id ? '编辑失败，请重试' : '添加失败，请重试')
+      } finally {
+        this.saving = false
       }
     },
 
-    async handleToggleTicketStatus(id, status) {
+    // 切换门票状态
+    async handleToggleTicketStatus(ticket) {
       try {
-        const response = await request.put(`/admin/ticket/${id}/status`, { status })
+        const newStatus = ticket.status === 1 ? 0 : 1  // 1 是在售，0 是停售
+        const tipText = newStatus === 1 ? '起售' : '停售'
+        
+        await this.$confirm(`确定要将该门票${tipText}吗？`, '提示', {
+          type: 'warning'
+        })
+        
+        const response = await request.post(`/admin/ticket/status/${newStatus}`, null, {
+          params: {
+            id: ticket.id
+          }
+        })
+        
         if (response.code === 1) {
-          alert(status ? '开售成功' : '停售成功')
-          this.fetchTickets()
+          this.$message.success(`${tipText}成功`)
+          this.fetchTickets()  // 刷新列表
         } else {
-          alert(response.msg || '操作失败')
+          this.$message.error(response.msg || `${tipText}失败`)
         }
       } catch (error) {
-        console.error('操作失败：', error)
-        alert('操作失败，请重试')
+        if (error !== 'cancel') {
+          console.error('操作失败：', error)
+          this.$message.error('操作失败，请重试')
+        }
       }
     },
 
     async handleDeleteTicket(id) {
-      if (!confirm('确定要删除这个票种吗？')) return
-      
       try {
-        const response = await request.delete(`/admin/ticket/${id}`)
+        await this.$confirm('确定要删除这个门票吗？', '提示', {
+          type: 'warning'
+        })
+        
+        const response = await request.delete('/admin/ticket', {
+          params: { id }
+        })
+        
         if (response.code === 1) {
-          alert('删除成功')
+          this.$message.success('删除成功')
           this.fetchTickets()
         } else {
-          alert(response.msg || '删除失败')
+          this.$message.error(response.msg || '删除失败')
         }
       } catch (error) {
-        console.error('删除失败：', error)
-        alert('删除失败，请重试')
+        if (error !== 'cancel') {
+          console.error('删除失败：', error)
+          this.$message.error('删除失败，请重试')
+        }
       }
     },
 
@@ -683,7 +776,7 @@ export default {
     // 获取用户列表
     async fetchUsers() {
       try {
-        const response = await request.get('/admin/page', {
+        const response = await request.get('/admin/user/page', {
           params: {
             pageNum: this.userCurrentPage,
             pageSize: this.userPageSize,
@@ -710,34 +803,44 @@ export default {
 
     async fetchTickets() {
       try {
-        const response = await request.get('/admin/ticket/list')
+        const response = await request.get('/admin/ticket/page', {
+          params: {
+            pageNum: this.ticketCurrentPage,
+            pageSize: this.ticketPageSize
+          }
+        })
+        
         if (response.code === 1) {
-          this.tickets = response.data
+          this.tickets = response.data.records
+          this.ticketTotal = response.data.total
+        } else {
+          this.$message.error(response.msg || '获取门票列表失败')
         }
       } catch (error) {
         console.error('获取门票列表失败：', error)
+        this.$message.error('获取门票列表失败')
       }
     },
 
     // 预约设置方法
     decreaseMaxVisitors() {
-      if (this.settings.maxVisitors > 1) {
-        this.settings.maxVisitors -= 100
+      if (this.settings.dailyLimit > 1) {
+        this.settings.dailyLimit -= 100
       }
     },
     increaseMaxVisitors() {
-      if (this.settings.maxVisitors < 10000) {
-        this.settings.maxVisitors += 100
+      if (this.settings.dailyLimit < 10000) {
+        this.settings.dailyLimit += 100
       }
     },
     decreaseAdvanceDays() {
-      if (this.settings.advanceDays > 1) {
-        this.settings.advanceDays--
+      if (this.settings.maxAdvanceDays > 1) {
+        this.settings.maxAdvanceDays--
       }
     },
     increaseAdvanceDays() {
-      if (this.settings.advanceDays < 30) {
-        this.settings.advanceDays++
+      if (this.settings.maxAdvanceDays < 30) {
+        this.settings.maxAdvanceDays++
       }
     },
     showAddSpecialDate() {
@@ -763,9 +866,41 @@ export default {
     },
     async fetchSettings() {
       try {
-        const response = await request.get('/admin/settings')
+        const response = await request.get('/admin/park/config/1')
+        console.log('获取设置返回数据：', response)
+        
         if (response.code === 1) {
-          this.settings = response.data
+          const config = response.data
+          // 转换后端数据到前端格式，处理时间格式
+          this.settings = {
+            parkName: config.parkName,
+            openTime: config.openTime.substring(0, 5),
+            closeTime: config.closeTime.substring(0, 5),
+            dailyLimit: config.dailyLimit,
+            maxAdvanceDays: config.maxAdvanceDays,
+            openingPeriods: config.openingPeriods.map(period => {
+              // 确保时间格式正确
+              const startTime = period.startTime.substring(0, 5)
+              const endTime = period.endTime.substring(0, 5)
+              
+              // 如果时间不在选项中，添加到选项列表
+              if (!this.timeOptions.includes(startTime)) {
+                this.timeOptions.push(startTime)
+              }
+              if (!this.timeOptions.includes(endTime)) {
+                this.timeOptions.push(endTime)
+              }
+              
+              return {
+                id: period.id,
+                startTime: startTime,
+                endTime: endTime
+              }
+            })
+          }
+          
+          // 对时间选项进行排序
+          this.timeOptions.sort()
         } else {
           this.$message.error(response.msg || '获取设置失败')
         }
@@ -776,22 +911,38 @@ export default {
     },
     async saveSettings() {
       try {
-        const response = await request.post('/admin/settings', this.settings)
+        // 构造请求数据
+        const configData = {
+          id: 1,  // 默认id为1
+          parkName: this.settings.parkName,
+          openTime: this.settings.openTime + ':00',  // 添加秒数
+          closeTime: this.settings.closeTime + ':00', // 添加秒数
+          dailyLimit: parseInt(this.settings.dailyLimit),
+          maxAdvanceDays: parseInt(this.settings.maxAdvanceDays),
+          openingPeriods: this.settings.openingPeriods.map(period => ({
+            id: period.id,
+            startTime: period.startTime + ':00',  // 添加秒数
+            endTime: period.endTime + ':00',      // 添加秒数
+          }))
+        }
+
+        const response = await request.put('/admin/park/config/1', configData)
+        
         if (response.code === 1) {
           this.$message.success('保存成功')
-          this.fetchSettings()
+          this.fetchSettings()  // 刷新设置
         } else {
           this.$message.error(response.msg || '保存失败')
         }
       } catch (error) {
-        console.error('保存失败：', error)
-        this.$message.error('保存失败，请重试')
+        console.error('保存设置失败：', error)
+        this.$message.error('保存设置失败，请重试')
       }
     },
     addTimeSlot() {
       const newSlot = {
-        start: '09:00',
-        end: '11:00'
+        startTime: '09:00',
+        endTime: '11:00'
       }
       
       if (this.checkTimeSlotOverlap(newSlot)) {
@@ -799,14 +950,14 @@ export default {
         return
       }
 
-      this.settings.timeSlots.push(newSlot)
+      this.settings.openingPeriods.push(newSlot)
     },
     checkTimeSlotOverlap(newSlot) {
-      return this.settings.timeSlots.some(slot => {
-        const newStart = this.timeToMinutes(newSlot.start)
-        const newEnd = this.timeToMinutes(newSlot.end)
-        const slotStart = this.timeToMinutes(slot.start)
-        const slotEnd = this.timeToMinutes(slot.end)
+      return this.settings.openingPeriods.some(slot => {
+        const newStart = this.timeToMinutes(newSlot.startTime)
+        const newEnd = this.timeToMinutes(newSlot.endTime)
+        const slotStart = this.timeToMinutes(slot.startTime)
+        const slotEnd = this.timeToMinutes(slot.endTime)
 
         return (newStart < slotEnd && newEnd > slotStart)
       })
@@ -816,7 +967,7 @@ export default {
       return hours * 60 + minutes
     },
     removeTimeSlot(index) {
-      this.settings.timeSlots.splice(index, 1)
+      this.settings.openingPeriods.splice(index, 1)
     },
     handlePageChange(page) {
       this.currentPage = page
@@ -958,18 +1109,63 @@ export default {
       try {
         this.exporting = true
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
-        const fileName = encodeURIComponent(`用户数据_${timestamp}.csv`)  // URL 编码中文文件名
-
-        // 直接通过 window.location.href 下载
-        window.location.href = `/api/admin/export?fileName=${fileName}`
+        const fileName = encodeURIComponent(`用户数据_${timestamp}.csv`)
         
-        this.$message.success('导出成功')
+        // 从 store 获取 token
+        const token = this.$store.state.token
+        
+        // 创建一个临时的 a 标签
+        const link = document.createElement('a')
+        link.href = `/api/admin/user/export?fileName=${fileName}`
+        // 添加 token 到请求头
+        link.setAttribute('download', `用户数据_${timestamp}.csv`)
+        
+        // 创建一个 XMLHttpRequest 来处理下载
+        const xhr = new XMLHttpRequest()
+        xhr.open('GET', link.href, true)
+        xhr.responseType = 'blob'
+        xhr.setRequestHeader('token', token)
+        
+        xhr.onload = () => {
+          if (xhr.status === 200) {
+            const blob = new Blob([xhr.response], { type: 'text/csv;charset=utf-8' })
+            const downloadUrl = URL.createObjectURL(blob)
+            link.href = downloadUrl
+            document.body.appendChild(link)
+            link.click()
+            document.body.removeChild(link)
+            URL.revokeObjectURL(downloadUrl)
+            this.$message.success('导出成功')
+          } else {
+            this.$message.error('导出失败，请重试')
+          }
+          this.exporting = false
+        }
+        
+        xhr.onerror = () => {
+          this.$message.error('导出失败，请重试')
+          this.exporting = false
+        }
+        
+        xhr.send()
       } catch (error) {
         console.error('导出失败：', error)
         this.$message.error('导出失败，请重试')
-      } finally {
         this.exporting = false
       }
+    },
+    handleTicketPageChange(page) {
+      this.ticketCurrentPage = page
+      this.fetchTickets()
+    },
+    handleTicketSizeChange(size) {
+      this.ticketPageSize = size
+      this.ticketCurrentPage = 1
+      this.fetchTickets()
+    },
+    // 切换 tab
+    handleTabChange(tab) {
+      this.currentTab = tab
     }
   },
   mounted() {
@@ -978,6 +1174,28 @@ export default {
     this.fetchOrders()
     this.fetchTickets()
     this.fetchSettings()
+  },
+  watch: {
+    currentTab(newTab) {
+      // 根据不同的 tab 刷新对应的数据
+      switch (newTab) {
+        case 'announcement':
+          this.getAnnouncements()
+          break
+        case 'user':
+          this.fetchUsers()
+          break
+        case 'reservation':
+          this.fetchOrders()
+          break
+        case 'ticket':
+          this.fetchTickets()
+          break
+        case 'settings':
+          this.fetchSettings()
+          break
+      }
+    }
   }
 }
 </script>
